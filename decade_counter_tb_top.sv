@@ -2,6 +2,12 @@
 `include "uvm_macros.svh"
 import uvm_pkg::*;
 
+//waveform dumping
+initial begin
+    $dumpfile("wave.vcd");
+    $dumpvars(0, tb_top);
+end
+
 // --- DUT Interface ---
 interface counter_if(input logic clk);
     logic rst;

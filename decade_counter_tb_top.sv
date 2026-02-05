@@ -2,12 +2,6 @@
 `include "uvm_macros.svh"
 import uvm_pkg::*;
 
-//waveform dumping
-initial begin
-    $dumpfile("wave.vcd");
-    $dumpvars(0, tb_top);
-end
-
 // --- DUT Interface ---
 interface counter_if(input logic clk);
     logic rst;
@@ -30,7 +24,6 @@ class counter_item extends uvm_sequence_item;
     
     function new(string name="counter_item"); super.new(name); endfunction
     
-    // Verilator supports standard constraints now!
     constraint rst_dist { rst dist {0:=90, 1:=10}; }
 endclass
 
@@ -92,6 +85,11 @@ endclass
 // --- Top Module ---
 module tb_top;
     logic clk;
+    initial begin
+    $dumpfile("wave.vcd");
+    $dumpvars(0, tb_top);
+end
+
     
     // Clock generation (Now supported by Verilator --timing)
     initial begin

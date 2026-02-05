@@ -1,113 +1,144 @@
-// Basic UVM Testbench for Verilator
+//============================================================
+// Basic Verilator-friendly UVM Testbench
+//============================================================
 `include "uvm_macros.svh"
 import uvm_pkg::*;
 
-// --- DUT Interface ---
+//------------------------------------------------------------
+// DUT Interface
+//------------------------------------------------------------
 interface counter_if(input logic clk);
     logic rst;
     logic en;
     logic [3:0] count;
 endinterface
 
-// --- UVM Components ---
-
+//------------------------------------------------------------
+// Sequence Item
+//------------------------------------------------------------
 class counter_item extends uvm_sequence_item;
     rand bit rst;
     rand bit en;
-    bit [3:0] count;
-    
-    `uvm_object_utils_begin(counter_item)
-        `uvm_field_int(rst, UVM_DEFAULT)
-        `uvm_field_int(en, UVM_DEFAULT)
-        `uvm_field_int(count, UVM_DEFAULT)
-    `uvm_object_utils_end
-    
-    function new(string name="counter_item"); super.new(name); endfunction
-    
+
+    `uvm_object_utils(counter_item)
+
+    function new(string name="counter_item");
+        super.new(name);
+    endfunction
+
     constraint rst_dist { rst dist {0:=90, 1:=10}; }
 endclass
 
-class counter_driver extends uvm_driver#(counter_item);
-    `uvm_component_utils(counter_driver)
-    virtual counter_if vif;
-    
-    function new(string name, uvm_component parent); super.new(name, parent); endfunction
-    
-    function void build_phase(uvm_phase phase);
-        if(!uvm_config_db#(virtual counter_if)::get(this, "", "vif", vif))
-            `uvm_fatal("NOVIF", "No virtual interface set")
+//------------------------------------------------------------
+// Sequencer
+//------------------------------------------------------------
+class counter_sequencer extends uvm_sequencer #(counter_item);
+    `uvm_component_utils(counter_sequencer)
+
+    function new(string name, uvm_component parent);
+        super.new(name, parent);
     endfunction
-    
+endclass
+
+//------------------------------------------------------------
+// Driver
+//------------------------------------------------------------
+class counter_driver extends uvm_driver #(counter_item);
+    `uvm_component_utils(counter_driver)
+
+    virtual counter_if vif;
+
+    function new(string name, uvm_component parent);
+        super.new(name, parent);
+    endfunction
+
+    function void build_phase(uvm_phase phase);
+        if (!uvm_config_db#(virtual counter_if)::get(this, "", "vif", vif))
+            `uvm_fatal("NOVIF", "Virtual interface not set")
+    endfunction
+
     task run_phase(uvm_phase phase);
         forever begin
             seq_item_port.get_next_item(req);
+
             @(negedge vif.clk);
             vif.rst <= req.rst;
             vif.en  <= req.en;
+
             seq_item_port.item_done();
         end
     endtask
 endclass
 
-class counter_test extends uvm_test;
-    `uvm_component_utils(counter_test)
-    // Simplified for brevity - normally you'd have env, agent, etc.
-    counter_driver drv;
-    
-    function new(string name, uvm_component parent); super.new(name, parent); endfunction
-    
-    function void build_phase(uvm_phase phase);
-        drv = counter_driver::type_id::create("drv", this);
+//------------------------------------------------------------
+// Agent
+//------------------------------------------------------------
+class counter_agent extends uvm_agent;
+    `uvm_component_utils(counter_agent)
+
+    counter_sequencer seqr;
+    counter_driver    drv;
+
+    function new(string name, uvm_component parent);
+        super.new(name, parent);
     endfunction
-    
-    task run_phase(uvm_phase phase);
+
+    function void build_phase(uvm_phase phase);
+        seqr = counter_sequencer::type_id::create("seqr", this);
+        drv  = counter_driver   ::type_id::create("drv",  this);
+    endfunction
+
+    function void connect_phase(uvm_phase phase);
+        drv.seq_item_port.connect(seqr.seq_item_export);
+    endfunction
+endclass
+
+//------------------------------------------------------------
+// Environment
+//------------------------------------------------------------
+class counter_env extends uvm_env;
+    `uvm_component_utils(counter_env)
+
+    counter_agent agent;
+
+    function new(string name, uvm_component parent);
+        super.new(name, parent);
+    endfunction
+
+    function void build_phase(uvm_phase phase);
+        agent = counter_agent::type_id::create("agent", this);
+    endfunction
+endclass
+
+//------------------------------------------------------------
+// Sequence
+//------------------------------------------------------------
+class counter_sequence extends uvm_sequence #(counter_item);
+    `uvm_object_utils(counter_sequence)
+
+    function new(string name="counter_sequence");
+        super.new(name);
+    endfunction
+
+    task body();
         counter_item item;
-        phase.raise_objection(this);
-        
-        // Reset sequence
+
+        // Apply reset
         item = counter_item::type_id::create("item");
-        item.rst = 1; item.en = 0;
-        drv.seq_item_port.put_response(item); // Direct drive for simplicity in example
-        
-        // Run loop
-        repeat(20) begin
-            item = new();
-            void'(item.randomize());
-            // In a real UVM agent, the sequencer handles this interaction
-            // Here we just print to prove it works
-            `uvm_info("TEST", $sformatf("Generated: rst=%b en=%b", item.rst, item.en), UVM_LOW)
-            #10; 
+        item.rst = 1;
+        item.en  = 0;
+        start_item(item);
+        finish_item(item);
+
+        // Normal operation
+        repeat (20) begin
+            item = counter_item::type_id::create("item");
+            assert(item.randomize());
+            start_item(item);
+            finish_item(item);
         end
-        phase.drop_objection(this);
     endtask
 endclass
 
-// --- Top Module ---
-module tb_top;
-    logic clk;
-    initial begin
-    $dumpfile("wave.vcd");
-    $dumpvars(0, tb_top);
-end
-
-    
-    // Clock generation (Now supported by Verilator --timing)
-    initial begin
-        clk = 0;
-        forever #5 clk = ~clk;
-    end
-    
-    counter_if vif(clk);
-    
-    decade_counter dut (
-        .clk(vif.clk),
-        .rst(vif.rst),
-        .en (vif.en),
-        .count(vif.count)
-    );
-    
-    initial begin
-        uvm_config_db#(virtual counter_if)::set(null, "*", "vif", vif);
-        run_test("counter_test");
-    end
-endmodule
+//------------------------------------------------------------
+//
